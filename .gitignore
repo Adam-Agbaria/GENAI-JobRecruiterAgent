@@ -1,0 +1,32 @@
+# Virtual environment
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Note: chroma_store/ and data/schedule.db are intentionally NOT ignored.
+# They are committed build artifacts required for Streamlit Community Cloud
+# cold starts (ephemeral filesystem, no build step to regenerate them).
+# See README.md "Project Structure" for rationale.
+
+# Fine-tuning intermediate artifact: regenerable from sms_conversations.json
+# via prepare_dataset.py, not needed at runtime.
+data/exit_advisor_finetune.jsonl
+data/schedule_eval.db
