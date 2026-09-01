@@ -40,7 +40,6 @@ app/
     info_advisor/m_4.py       # Conversation Info Advisor (RAG)
     scheduling_db/            # SQLite schema/seed + repository (see "SQL backend" below)
     embedding/build_index.py  # offline PDF -> Chroma pipeline
-    fine_tuning/              # Exit Advisor fine-tuning pipeline
 streamlit_app/
   streamlit_main.py           # Streamlit chat UI (PoC in place of real SMS)
   utils.py                    # UI-only helpers, no business logic
@@ -125,15 +124,23 @@ Recruiter: Great, you're confirmed for 2026-09-04 at 09:00! You'll receive a cal
            invite shortly.
 ```
 
-## Fine-Tuning Note
+## Prompt Engineering Note (Exit Advisor)
 
-`app/modules/fine_tuning/` builds a real OpenAI fine-tuning pipeline for the Exit Advisor
-(`prepare_dataset.py` → `run_finetune.py`), and it was run as a genuine attempt. However,
-`sms_conversations.json` only contains **15 positive ("end") examples across 59 labeled turns**
-— a very small set for a robust fine-tune. Because of this, the Exit Advisor's default and
-fallback path is careful **few-shot prompting** (`app/modules/exit_advisor/m_2.py`), and the
-fine-tuned model is only used when `EXIT_ADVISOR_FINE_TUNED_MODEL_ID` is explicitly set in
-`.env` — no code changes are needed to switch between the two.
+The assignment originally called for fine-tuning the Exit Advisor. Following an OpenAI API
+change that made this impractical mid-course, guidance was updated to implement this advisor
+entirely via **prompt engineering** instead — this project follows that guidance, and no
+fine-tuning code is included. `app/modules/exit_advisor/m_2.py` combines the required prompting
+strategies:
+
+- **Role prompt** — the system message casts the model narrowly as "the Conversation Exit
+  Advisor," scoped to a single decision.
+- **Instruction prompt** — explicit rules for when to end vs. not end the conversation.
+- **Few-shot learning** — examples drawn directly from `sms_conversations.json`'s `end`-labeled
+  turns, covering both disengagement ("no longer interested," "stop texting me") and
+  post-confirmation wrap-up ("Monday at 3 PM is good.") patterns, plus near-miss non-examples to
+  prevent over-triggering.
+- **API parameters** — a low temperature (0.1) to keep this classification-flavored decision
+  close to deterministic.
 
 ## Evaluation Summary
 

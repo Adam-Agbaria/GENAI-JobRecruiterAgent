@@ -6,11 +6,12 @@ the candidate is disengaging (no longer interested, found another job, asked
 to stop being contacted) or because the interview has just been confirmed and
 the exchange has naturally wrapped up.
 
-Uses `EXIT_ADVISOR_MODEL` from app.config, which is the fine-tuned model id
-once one is trained (see app/modules/fine_tuning), and otherwise falls back
-to the base chat model with the few-shot examples baked into the prompt
-below. No other code needs to change when a fine-tuned model becomes
-available.
+Implemented entirely via prompt engineering (role prompt + explicit
+instructions + few-shot examples drawn from sms_conversations.json + a low
+temperature API parameter), not fine-tuning: an OpenAI fine-tuning pass was
+initially planned for this advisor, but was dropped after an OpenAI API
+change made it impractical for this course project, per updated course
+guidance to use prompt engineering here instead.
 """
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -33,16 +34,20 @@ negotiating a time, or otherwise engaged but nothing has been confirmed yet.
 Examples of candidate messages that SHOULD end the conversation:
 - "Please remove me from your list. Thanks." (disinterest)
 - "I'm no longer interested in the position." (disinterest)
-- "I will be in touch, please stop texting me" (disinterest)
+- "I will be intouch, please stop texting me" (disinterest, informal phrasing/typos still count)
+- "I'm sorry, but I'm no longer interested." (polite disinterest)
 - "Monday at 3 PM is good." (right after a slot was already proposed and accepted -> \
 interview confirmed, wrap up)
 - "Tuesday at 10 AM works." (same pattern: accepting a proposed slot -> wrap up)
+- "Sounds greate, see you then" (casual acknowledgment right after a slot was confirmed)
 
 Examples of candidate messages that should NOT end the conversation:
 - "I've been using Python professionally for five years, mostly for data analysis." \
 (still answering questions, engaged)
 - "Could you share more about the company's cloud technologies?" (asking a question)
 - "I can't at that time, I'm busy." (still negotiating a time, not disengaging)
+- "I would like to set an appointment, does Monday at 3 PM work?" (proposing a time, not \
+accepting one yet — scheduling should confirm first, this advisor should not end here)
 """
 
 
@@ -55,7 +60,7 @@ class ExitDecision(BaseModel):
 class ConversationExitAdvisor:
     def __init__(self, model: str | None = None):
         self.llm = ChatOpenAI(
-            model=model or config.EXIT_ADVISOR_MODEL,
+            model=model or config.OPENAI_CHAT_MODEL,
             api_key=config.OPENAI_API_KEY,
             temperature=0.1,
         ).with_structured_output(ExitDecision)
