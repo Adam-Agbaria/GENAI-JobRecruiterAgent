@@ -14,10 +14,6 @@ portable course PoC:
   against real, non-expired data. The evaluation notebook re-seeds a
   separate DB anchored at 2024-01-01 to stay faithful to the labeled
   dataset's timestamps.
-
-Also creates a `bookings` table (not present in db_Tech.sql) to record which
-slots the app itself has actually booked, since `available = 0` alone can't
-distinguish a real booking from a randomly-seeded pre-existing commitment.
 """
 import random
 import sqlite3
@@ -58,7 +54,6 @@ def create_and_seed(
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("DROP TABLE IF EXISTS schedule")
-        conn.execute("DROP TABLE IF EXISTS bookings")
         conn.execute(
             """
             CREATE TABLE schedule (
@@ -67,19 +62,6 @@ def create_and_seed(
                 time        TEXT NOT NULL,
                 position    TEXT NOT NULL,
                 available   INTEGER NOT NULL
-            )
-            """
-        )
-        # Separate from `available` (which also reflects randomly-seeded pre-existing
-        # commitments, ~50% of rows): this table records only slots the app itself
-        # booked via ScheduleRepository.book_slot(), so real reservations can be told
-        # apart from seed-time unavailability.
-        conn.execute(
-            """
-            CREATE TABLE bookings (
-                schedule_id INTEGER PRIMARY KEY,
-                booked_at_utc TEXT NOT NULL,
-                FOREIGN KEY (schedule_id) REFERENCES schedule (schedule_id)
             )
             """
         )

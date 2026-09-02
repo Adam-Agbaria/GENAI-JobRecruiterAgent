@@ -1,7 +1,7 @@
 """Read/write access to the `schedule` table for the Scheduling Advisor."""
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 
 @dataclass
@@ -61,40 +61,14 @@ class ScheduleRepository:
             conn.close()
 
     def book_slot(self, schedule_id: int) -> bool:
-        """Marks a slot as no longer available and records it in `bookings`
-        (distinct from seed-time unavailability). Returns True if booked."""
+        """Marks a slot as no longer available. Returns True if a row was updated."""
         conn = self._connect()
         try:
             cur = conn.execute(
                 "UPDATE schedule SET available = 0 WHERE schedule_id = ? AND available = 1",
                 (schedule_id,),
             )
-            if cur.rowcount > 0:
-                conn.execute(
-                    "INSERT OR REPLACE INTO bookings (schedule_id, booked_at_utc) VALUES (?, ?)",
-                    (schedule_id, datetime.now(UTC).isoformat()),
-                )
             conn.commit()
             return cur.rowcount > 0
-        finally:
-            conn.close()
-
-    def list_bookings(self) -> list[dict]:
-        """Returns all slots the app has actually booked (via book_slot), joined
-        with their schedule details, most recently booked first."""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT s.schedule_id, s.date, s.time, s.position, b.booked_at_utc
-                FROM bookings b
-                JOIN schedule s ON s.schedule_id = b.schedule_id
-                ORDER BY b.booked_at_utc DESC
-                """
-            ).fetchall()
-            return [
-                {"schedule_id": r[0], "date": r[1], "time": r[2], "position": r[3], "booked_at_utc": r[4]}
-                for r in rows
-            ]
         finally:
             conn.close()

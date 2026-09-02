@@ -1,17 +1,25 @@
 """Fast unit tests: no OpenAI API calls. Advisors are mocked so these test the
-repository's SQL logic and the Main Agent's fusion/priority rules in isolation."""
-from datetime import datetime
+repository's SQL logic and each Main Agent advisor-tool wrapper in isolation.
+
+The Main Agent's *routing* (which advisor to consult, and when to finalize) is
+itself an LLM decision now (see app/modules/main_agent/m_1.py), so it can't be
+tested deterministically without a real API call. What CAN be tested without
+one is that each tool wrapper calls the right advisor and produces the right
+side effects (e.g. booking on confirmation) — that's what these tests cover.
+A single real end-to-end test of MainAgent.step() is included, gated on an
+OpenAI API key being configured."""
+from datetime import date, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
+from app import config
 from app.modules.main_agent.m_1 import MainAgent
 from app.modules.scheduling_advisor.m_3 import ProposedSlot, SchedulingDecision
 from app.modules.scheduling_db.repository import ScheduleRepository
 from app.modules.scheduling_db.schema_migrate import create_and_seed
 from app.modules.exit_advisor.m_2 import ExitDecision
 from app.modules.info_advisor.m_4 import InfoReply
-from datetime import date
 
 
 @pytest.fixture()
@@ -41,72 +49,96 @@ def test_book_slot_flips_availability_and_is_idempotent(repo):
     assert all(s.schedule_id != slot_id for s in remaining)
 
 
-def test_list_bookings_only_reflects_actual_app_bookings(repo):
-    # Seed-time unavailability (~50% of rows) must not show up as a "booking".
-    assert repo.list_bookings() == []
-
-    slots = repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=1)
-    repo.book_slot(slots[0].schedule_id)
-
-    bookings = repo.list_bookings()
-    assert len(bookings) == 1
-    assert bookings[0]["schedule_id"] == slots[0].schedule_id
-    assert bookings[0]["position"] == "Python Dev"
-
-
-def _make_agent(repo, exit_should_end=False, exit_confidence=0.9, scheduling_should_schedule=False,
-                 confirmed_slot=None, proposed_slots=None, info_reply_text="Sure, tell me more."):
-    exit_advisor = MagicMock()
-    exit_advisor.decide.return_value = ExitDecision(should_end=exit_should_end, confidence=exit_confidence, reason="test reason")
-
-    scheduling_advisor = MagicMock()
-    scheduling_advisor.decide.return_value = SchedulingDecision(
-        should_schedule_now=scheduling_should_schedule,
-        proposed_slots=proposed_slots or [],
-        confirmed_slot=confirmed_slot,
+def _make_agent(repo, exit_advisor=None, scheduling_advisor=None, info_advisor=None):
+    return MainAgent(
+        exit_advisor or MagicMock(),
+        scheduling_advisor or MagicMock(),
+        info_advisor or MagicMock(),
+        repo,
     )
 
-    info_advisor = MagicMock()
-    info_advisor.respond.return_value = InfoReply(reply_text=info_reply_text, wants_to_schedule_hint=False)
 
-    return MainAgent(exit_advisor, scheduling_advisor, info_advisor, repo)
+def test_consult_exit_advisor_tool_delegates_and_returns_decision(repo):
+    exit_advisor = MagicMock()
+    exit_advisor.decide.return_value = ExitDecision(
+        should_end=True, confidence=0.9, end_reason_category="disinterest", reason="no longer interested"
+    )
+    agent = _make_agent(repo, exit_advisor=exit_advisor)
 
+    tools, tool_by_name = agent._build_tools("history", "I'm no longer interested.", datetime.now())
+    result = tool_by_name["consult_exit_advisor"].invoke({})
 
-def test_end_takes_priority_over_scheduling_and_info(repo):
-    agent = _make_agent(repo, exit_should_end=True, exit_confidence=0.9, scheduling_should_schedule=True)
-    decision = agent.step([], "I'm no longer interested.", datetime.now())
-    assert decision.action == "end"
-
-
-def test_low_confidence_end_does_not_trigger(repo):
-    agent = _make_agent(repo, exit_should_end=True, exit_confidence=0.2, scheduling_should_schedule=False)
-    decision = agent.step([], "hello", datetime.now())
-    assert decision.action != "end"
+    exit_advisor.decide.assert_called_once_with("history", "I'm no longer interested.")
+    assert result["should_end"] is True
+    assert result["end_reason_category"] == "disinterest"
 
 
-def test_schedule_beats_continue_when_proposing(repo):
+def test_consult_scheduling_advisor_tool_proposes_real_slots(repo):
     slot = ProposedSlot(schedule_id=1, date="2024-04-05", time="10:00:00", position="Python Dev")
-    agent = _make_agent(repo, scheduling_should_schedule=True, proposed_slots=[slot])
-    decision = agent.step([], "I'd like to schedule.", datetime.now())
-    assert decision.action == "schedule"
-    assert "2024-04-05" in decision.reply_text
+    scheduling_advisor = MagicMock()
+    scheduling_advisor.decide.return_value = SchedulingDecision(
+        should_schedule_now=True, proposed_slots=[slot], confirmed_slot=None
+    )
+    agent = _make_agent(repo, scheduling_advisor=scheduling_advisor)
+    now = datetime.now()
+
+    tools, tool_by_name = agent._build_tools("history", "how about next Friday?", now)
+    result = tool_by_name["consult_scheduling_advisor"].invoke({})
+
+    scheduling_advisor.decide.assert_called_once_with("history", "how about next Friday?", now)
+    assert result["proposed_slots"][0]["date"] == "2024-04-05"
 
 
-def test_schedule_confirmation_books_the_slot(repo):
-    slots = repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=1)
-    real_slot_id = slots[0].schedule_id
-    confirmed = ProposedSlot(schedule_id=real_slot_id, date=slots[0].date, time=slots[0].time, position="Python Dev")
+def test_consult_scheduling_advisor_tool_books_confirmed_slot(repo):
+    real_slot = repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=1)[0]
+    confirmed = ProposedSlot(
+        schedule_id=real_slot.schedule_id, date=real_slot.date, time=real_slot.time, position="Python Dev"
+    )
+    scheduling_advisor = MagicMock()
+    scheduling_advisor.decide.return_value = SchedulingDecision(
+        should_schedule_now=True, proposed_slots=[], confirmed_slot=confirmed
+    )
+    agent = _make_agent(repo, scheduling_advisor=scheduling_advisor)
 
-    agent = _make_agent(repo, scheduling_should_schedule=True, confirmed_slot=confirmed)
-    decision = agent.step([], "Monday at 3 PM works.", datetime.now())
+    tools, tool_by_name = agent._build_tools("history", "Monday at 3 PM works.", datetime.now())
+    result = tool_by_name["consult_scheduling_advisor"].invoke({})
 
-    assert decision.action == "schedule"
-    remaining = repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=100)
-    assert all(s.schedule_id != real_slot_id for s in remaining)
+    assert result["confirmed_slot"]["schedule_id"] == real_slot.schedule_id
+    remaining_ids = {
+        s.schedule_id for s in repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=1000)
+    }
+    assert real_slot.schedule_id not in remaining_ids
 
 
-def test_falls_through_to_info_advisor_when_no_end_or_schedule(repo):
-    agent = _make_agent(repo, info_reply_text="Tell me about your Python experience.")
-    decision = agent.step([], "Hi", datetime.now())
+def test_consult_info_advisor_tool_delegates_and_returns_reply(repo):
+    info_advisor = MagicMock()
+    info_advisor.respond.return_value = InfoReply(
+        reply_text="Tell me about your Python experience.", wants_to_schedule_hint=False
+    )
+    agent = _make_agent(repo, info_advisor=info_advisor)
+
+    tools, tool_by_name = agent._build_tools("history", "Hi", datetime.now())
+    result = tool_by_name["consult_info_advisor"].invoke({})
+
+    info_advisor.respond.assert_called_once_with("history", "Hi")
+    assert result["reply_text"] == "Tell me about your Python experience."
+
+
+@pytest.mark.skipif(not config.OPENAI_API_KEY, reason="requires a real OpenAI API key")
+def test_step_end_to_end_routes_to_continue_with_real_advisors(repo):
+    from app.modules.exit_advisor.m_2 import ConversationExitAdvisor
+    from app.modules.scheduling_advisor.m_3 import InterviewSchedulingAdvisor
+
+    class _StubInfoAdvisor:
+        def respond(self, history_text, candidate_message):
+            return InfoReply(reply_text="Could you tell me more about your experience?", wants_to_schedule_hint=False)
+
+    agent = MainAgent(
+        exit_advisor=ConversationExitAdvisor(),
+        scheduling_advisor=InterviewSchedulingAdvisor(repo, position="Python Dev"),
+        info_advisor=_StubInfoAdvisor(),
+        repository=repo,
+    )
+    decision = agent.step([], "hey, nice to meet you", datetime(2024, 4, 3, 15, 12, 0))
     assert decision.action == "continue"
-    assert decision.reply_text == "Tell me about your Python experience."
+    assert decision.reply_text
