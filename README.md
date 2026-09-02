@@ -271,7 +271,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 **Adam Agbaria** - [agbariaadam@yahoo.com](mailto:agbariaadam@yahoo.com)
 App Link: [StreamApp](https://adam-agbaria-genai.streamlit.app)
-GitHub Link: [https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent](https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent)
+GitHub Link: [LINK](https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent)
 
 ---
 <br></br>
