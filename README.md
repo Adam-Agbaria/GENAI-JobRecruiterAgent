@@ -163,9 +163,9 @@ Recruiter: Great, you're confirmed for 2026-09-04 at 09:00! You'll receive a cal
 ## Screenshots
 
 <p float="left">
-  <img src="docs/screenshots/cli_demo.png" width="600"/>
+  <img src="docs/screenshots/cli_demo.jpg" width="600"/>
   <br><br>
-  <img src="docs/screenshots/streamlit_demo.png" width="600"/>
+  <img src="docs/screenshots/streamlit_demo.jpg" width="600"/>
 </p>
 
 ---
