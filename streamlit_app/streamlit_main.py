@@ -30,6 +30,10 @@ if st.button("Reset conversation"):
     reset_conversation()
     st.rerun()
 
+if st.session_state.get("confirmed_slot"):
+    slot = st.session_state.confirmed_slot
+    st.success(f"Interview booked: {slot['date']} at {slot['time'][:5]} ({slot['position']})")
+
 for turn in st.session_state.history:
     render_message(turn["speaker"], turn["text"])
 
@@ -46,5 +50,11 @@ else:
         st.session_state.history.append({"speaker": "recruiter", "text": decision.reply_text})
         render_message("recruiter", decision.reply_text)
 
+        for consultation in decision.meta.get("consultations", []):
+            confirmed_slot = consultation["output"].get("confirmed_slot")
+            if consultation["advisor"] == "consult_scheduling_advisor" and confirmed_slot:
+                st.session_state.confirmed_slot = confirmed_slot
+
         if decision.action == "end":
             st.session_state.ended = True
+            st.rerun()
