@@ -50,10 +50,19 @@ class MainAgent:
 
         exit_decision = self.exit_advisor.decide(history_text, candidate_message)
         if exit_decision.should_end and exit_decision.confidence >= self.exit_confidence_threshold:
+            meta = {"exit": exit_decision.model_dump()}
+            if exit_decision.end_reason_category == "confirmation":
+                # The candidate just accepted a specific slot named earlier in the
+                # conversation — resolve it against real availability and book it
+                # before closing, so "confirmed" reflects an actual DB booking.
+                scheduling_decision = self.scheduling_advisor.decide(history_text, candidate_message, conversation_now)
+                meta["scheduling"] = scheduling_decision.model_dump()
+                if scheduling_decision.confirmed_slot:
+                    self.repository.book_slot(scheduling_decision.confirmed_slot.schedule_id)
             return AgentDecision(
                 action="end",
-                reply_text=self._closing_message(exit_decision.reason),
-                meta={"exit": exit_decision.model_dump()},
+                reply_text=self._closing_message(exit_decision.end_reason_category),
+                meta=meta,
             )
 
         scheduling_decision = self.scheduling_advisor.decide(history_text, candidate_message, conversation_now)
@@ -77,9 +86,8 @@ class MainAgent:
         )
 
     @staticmethod
-    def _closing_message(reason: str) -> str:
-        wrap_keywords = ("confirm", "interview", "schedule", "booked")
-        if any(k in reason.lower() for k in wrap_keywords):
+    def _closing_message(end_reason_category: str) -> str:
+        if end_reason_category == "confirmation":
             return "Great, your interview is confirmed. You'll receive a calendar invite shortly."
         return "No worries — I appreciate the update. Take care!"
 

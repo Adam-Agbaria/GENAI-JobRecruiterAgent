@@ -13,6 +13,8 @@ initially planned for this advisor, but was dropped after an OpenAI API
 change made it impractical for this course project, per updated course
 guidance to use prompt engineering here instead.
 """
+from typing import Literal
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -25,35 +27,59 @@ Python Developer. Your only job is to decide whether the conversation should END
 End the conversation when:
 - The candidate clearly disengages: no longer interested, found another job, \
 asks to stop being contacted or removed from the list.
-- An interview slot was just confirmed and the candidate's latest message is simply \
-acknowledging/confirming it (nothing more to discuss).
+- The RECRUITER's own prior message in the conversation history already proposed one or more \
+specific candidate date/time options (e.g., "Wednesday at 10 AM or Thursday at 2 PM"), AND the \
+candidate's latest message is accepting one of those exact times — nothing more to discuss.
 
-Do NOT end the conversation when the candidate is still asking questions, still \
-negotiating a time, or otherwise engaged but nothing has been confirmed yet.
+Do NOT end the conversation when:
+- The candidate is still asking questions, still negotiating a time, or otherwise engaged.
+- The candidate is merely expressing general willingness or interest in scheduling (e.g., \
+"sure, I'd love to", "next Friday works for me", "sounds great, let's set something up") but \
+no recruiter message has yet proposed concrete date/time options for them to accept. This is \
+still an open invitation to schedule, not a confirmation — it should be routed to actually \
+look up and propose real times, not treated as a wrap-up.
 
-Examples of candidate messages that SHOULD end the conversation:
-- "Please remove me from your list. Thanks." (disinterest)
-- "I'm no longer interested in the position." (disinterest)
+Examples of candidate messages that SHOULD end the conversation (a concrete slot was already \
+proposed by the recruiter earlier in the history, and this message accepts it):
+- "Please remove me from your list. Thanks." (disinterest — always ends regardless of history)
+- "I'm no longer interested in the position." (disinterest — always ends)
 - "I will be intouch, please stop texting me" (disinterest, informal phrasing/typos still count)
-- "I'm sorry, but I'm no longer interested." (polite disinterest)
-- "Monday at 3 PM is good." (right after a slot was already proposed and accepted -> \
-interview confirmed, wrap up)
-- "Tuesday at 10 AM works." (same pattern: accepting a proposed slot -> wrap up)
-- "Sounds greate, see you then" (casual acknowledgment right after a slot was confirmed)
+- "I'm sorry, but I'm no longer interested." (polite disinterest — always ends)
+- "Monday at 3 PM is good." (given the recruiter already offered specific slots including \
+Monday 3 PM earlier in the history -> accepting one of them, wrap up)
+- "Tuesday at 10 AM works." (same pattern: accepting a specific previously-offered slot)
+- "Sounds greate, see you then" (acknowledgment right after the recruiter already confirmed \
+a booked slot)
 
 Examples of candidate messages that should NOT end the conversation:
 - "I've been using Python professionally for five years, mostly for data analysis." \
 (still answering questions, engaged)
 - "Could you share more about the company's cloud technologies?" (asking a question)
 - "I can't at that time, I'm busy." (still negotiating a time, not disengaging)
-- "I would like to set an appointment, does Monday at 3 PM work?" (proposing a time, not \
-accepting one yet — scheduling should confirm first, this advisor should not end here)
+- "I would like to set an appointment, does Monday at 3 PM work?" (candidate proposing a \
+time themselves — nothing was offered by the recruiter yet to accept, and this needs to be \
+checked against real availability first)
+- "Sure, next Friday works for me." with no prior recruiter message naming specific times \
+(general willingness only — no concrete slot exists yet to be confirming; route to scheduling \
+so real times can be looked up and offered first)
+
+When should_end is True, also set end_reason_category: "disinterest" for a disengaging \
+candidate, or "confirmation" for accepting an already-proposed slot. Leave it "not_applicable" \
+when should_end is False.
 """
 
 
 class ExitDecision(BaseModel):
     should_end: bool = Field(description="True if the conversation should end now")
     confidence: float = Field(description="Confidence in [0, 1]")
+    end_reason_category: Literal["disinterest", "confirmation", "not_applicable"] = Field(
+        default="not_applicable",
+        description=(
+            "Why the conversation should end, when should_end is True: 'disinterest' if the "
+            "candidate disengaged, 'confirmation' if they just accepted a specific slot the "
+            "recruiter already proposed. 'not_applicable' when should_end is False."
+        ),
+    )
     reason: str = Field(description="One short sentence explaining the decision")
 
 
