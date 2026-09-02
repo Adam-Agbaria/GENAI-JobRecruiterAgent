@@ -1,81 +1,105 @@
-# SMS Job-Candidate Recruiting Bot (GenAI Course Project)
+<!-- PROJECT LOGO -->
+<p align="center">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg" alt="Logo" width="120" height="120">
+</p>
 
-## Purpose
+<h1 align="center">GenAI Job Recruiter Agent</h1>
 
-A conversational bot that stands in for a human recruiter texting with candidates for a
-**Python Developer** position. Each turn it decides whether to **continue** the conversation,
-**schedule** an interview, or **end** the conversation — gathering/verifying candidate
-information, answering questions about the role (grounded in the job description via RAG),
-and booking a real interview slot against a recruiter availability database.
+<p align="center">
+  An SMS-style recruiting chatbot for a Python Developer role, built with a Main Agent + 3 specialist advisors<br>
+  <a href="https://adam-agbaria-genai.streamlit.app">View Demo</a>
+  ·
+  <a href="https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent/issues">Report Bug</a>
+  ·
+  <a href="https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent/issues">Request Feature</a>
+</p>
 
-## Architecture
+---
+<br></br>
 
-A **Main Agent** orchestrates the conversation and consults three specialized **Advisors** at
-each turn, in priority order:
+## Table of Contents
+
+- [About The Project](#about-the-project)
+- [Features](#features)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [Screenshots](#screenshots)
+- [Code Examples](#code-examples)
+- [Project Structure](#project-structure)
+- [Design Notes & Deviations](#design-notes--deviations)
+- [To-Do List](#to-do-list)
+- [License](#license)
+- [Contact](#contact)
+- [Acknowledgments](#acknowledgments)
+
+---
+<br></br>
+
+## About The Project
+
+> A conversational bot that stands in for a human recruiter texting with candidates for a
+> **Python Developer** position. Each turn it decides whether to **continue** the conversation,
+> **schedule** an interview, or **end** the conversation — gathering/verifying candidate
+> information, answering questions about the role (grounded in the job description via RAG),
+> and booking a real interview slot against a recruiter availability database.
+
+A **Main Agent** orchestrates the conversation with a candidate. Per the project's workflow
+diagram, it dynamically decides which ONE of three specialist advisors to consult at a time —
+it can consult more than one advisor in sequence before replying, rather than following a fixed
+call-all-three order:
 
 1. **Conversation Exit Advisor** — decides if the conversation should end now (candidate
-   disengaged, or an interview was just confirmed and the exchange is wrapping up).
+   disengaged, or an interview was just confirmed and the exchange is wrapping up). Implemented
+   entirely via **prompt engineering** (role prompt, explicit instructions, few-shot examples,
+   low temperature) rather than fine-tuning — see [Design Notes](#design-notes--deviations).
 2. **Interview Scheduling Advisor** — decides if it's time to propose or confirm an interview
    slot. Resolves relative dates ("next Friday") against the conversation's own timestamp, then
-   calls a function-calling tool that queries a SQL-backed availability table for real open slots.
-3. **Conversation Info Advisor** — answers the candidate's questions using retrieval-augmented
-   generation over the job description (Chroma vector store), and drafts the next message.
+   calls a **function-calling tool** that queries a SQL-backed availability table for real open
+   slots.
+3. **Conversation Info Advisor** — answers the candidate's questions using **retrieval-augmented
+   generation** over the job description (Chroma vector store), and drafts the next message.
 
-The Main Agent is a deterministic Python function (not an autonomous LLM-driven control loop),
-so its decisions are unit-testable and reproducible when replayed against the labeled evaluation
-set. Each Advisor internally uses LangChain (chat models, prompt templates, structured output,
-tool-calling, and a Chroma retriever).
+Each advisor is exposed to the Main Agent as a callable tool; the Main Agent's own LLM call
+decides which to invoke, executes it, and loops until it has enough information to finalize the
+turn's action and reply text.
 
-## Project Structure
+<div style="background: #272822; color: #f8f8f2; padding: 10px; border-radius: 8px;">
+  <b>Technologies:</b> Python, LangChain, OpenAI API, Streamlit, SQLite, ChromaDB, pytest, Jupyter/scikit-learn
+</div>
 
-```
-app/
-  main.py                     # CLI entry point + build_main_agent() shared wiring
-  config.py                   # env loading, model names, file paths
-  conversation.py             # shared Turn/history formatting helpers
-  modules/
-    main_agent/m_1.py         # MainAgent: orchestration + fusion logic
-    exit_advisor/m_2.py       # Conversation Exit Advisor
-    scheduling_advisor/m_3.py # Interview Scheduling Advisor + function-calling tool
-    info_advisor/m_4.py       # Conversation Info Advisor (RAG)
-    scheduling_db/            # SQLite schema/seed + repository (see "SQL backend" below)
-    embedding/build_index.py  # offline PDF -> Chroma pipeline
-streamlit_app/
-  streamlit_main.py           # Streamlit chat UI (PoC in place of real SMS)
-  utils.py                    # UI-only helpers, no business logic
-tests/
-  test_main.py                # unit tests (repository + Main Agent fusion, mocked advisors)
-  test_evals.ipynb            # accuracy + confusion matrix against sms_conversations.json
-data/schedule.db              # generated SQLite DB (committed — see below)
-chroma_store/                 # generated Chroma vector store (committed — see below)
-```
+---
+<br></br>
 
-### Deviations from the literal assignment skeleton (and why)
+## Features
 
-- **SQL Server → SQLite.** The provided `db_Tech.sql` targets SQL Server, which isn't practical
-  for a portable course PoC deployed on Streamlit Community Cloud (no SQL Server available there).
-  `app/modules/scheduling_db/schema_migrate.py` reimplements the same schema and business rules
-  (Tue/Wed/Thu/Fri/Sun only, 09:00-17:00 hourly, ~50/50 random availability) in SQLite, with a
-  dynamic date-seeding window (anchored to "today" + a lookahead) instead of the original's
-  hardcoded 2024, so relative-date queries in the live demo always have real matching data. The
-  evaluation notebook re-seeds a separate DB anchored at 2024-01-01 to stay faithful to the
-  labeled dataset's timestamps.
-- **Descriptive module names** (`main_agent`, `exit_advisor`, ...) instead of literal
-  `module_1`/`module_2` — the assignment spec itself calls those illustrative example names.
-- **`app/config.py` and `app/conversation.py` added** — shared env loading and history-formatting
-  helpers reused by every advisor, the CLI, the Streamlit app, and the eval notebook.
-- **`chroma_store/` and `data/schedule.db` are committed**, not gitignored — Streamlit Community
-  Cloud's filesystem is ephemeral on cold start, and rebuilding them on every boot would waste
-  embedding API calls and add latency for a tiny, rarely-changing source PDF.
-- **Plain Python orchestration instead of LangGraph/AgentExecutor** for the Main Agent —
-  deterministic, unit-testable turn-by-turn decisions are required to score accuracy/confusion
-  matrix against the labeled dataset; LangChain is still used inside every advisor.
+- [x] Main Agent + 3 specialist advisors (Exit / Scheduling / Info), dynamically routed via LLM tool-calling
+- [x] Function calling against a SQL-backed interview scheduling database
+- [x] Retrieval-augmented generation (Chroma) over the job description PDF
+- [x] Prompt engineering (role, instructions, few-shot, API params) for the Exit Advisor
+- [x] Real interview booking, persisted to the database
+- [x] Streamlit proof-of-concept chat UI, standing in for real SMS
+- [x] Unit tests (fast, no API calls) + a real end-to-end integration test
+- [x] Evaluation notebook: accuracy + confusion matrix against a labeled conversation dataset
+- [x] Deployed to Streamlit Community Cloud
 
-## Install & Run Locally
+---
+<br></br>
+
+##  Getting Started
+
+### Prerequisites
+
+- Python >= 3.11
+- pip
+- An OpenAI API key
+
+### Installation
 
 ```bash
+git clone https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent.git
+cd GENAI-JobRecruiterAgent
 python -m venv .venv
-.venv/Scripts/activate        # Windows; use `source .venv/bin/activate` on macOS/Linux
+.venv\Scripts\activate        # Windows; use `source .venv/bin/activate` on macOS/Linux
 pip install -r requirements.txt
 cp .env.example .env          # then fill in OPENAI_API_KEY
 ```
@@ -88,28 +112,37 @@ python -m app.modules.scheduling_db.schema_migrate
 python -m app.modules.embedding.build_index
 ```
 
-Run the CLI demo (type candidate replies, `quit` to exit):
+---
+<br></br>
+
+## Usage
+
+### Run the CLI:
 
 ```bash
 python -m app.main
 ```
 
-Run the Streamlit PoC:
+### Or run the Streamlit PoC:
 
 ```bash
 streamlit run streamlit_app/streamlit_main.py
 ```
 
-Run unit tests (fast, no API calls — advisors are mocked):
+### Check which interviews have actually been booked:
 
 ```bash
-pytest tests/test_main.py
+python -m app.modules.scheduling_db.list_bookings
 ```
 
-Run the evaluation notebook (`tests/test_evals.ipynb`) to reproduce accuracy + confusion matrix
-against the 59 labeled turns in `sms_conversations.json`.
+### Run tests / evaluation:
 
-## Usage Example
+```bash
+pytest tests/test_main.py          # fast unit tests, no API calls
+jupyter notebook tests/test_evals.ipynb   # accuracy + confusion matrix
+```
+
+Example conversation:
 
 ```
 Recruiter: Thanks for applying to our Python Developer opening. What kinds of Python
@@ -124,32 +157,128 @@ Recruiter: Great, you're confirmed for 2026-09-04 at 09:00! You'll receive a cal
            invite shortly.
 ```
 
-## Prompt Engineering Note (Exit Advisor)
+---
+<br></br>
 
-The assignment originally called for fine-tuning the Exit Advisor. Following an OpenAI API
-change that made this impractical mid-course, guidance was updated to implement this advisor
-entirely via **prompt engineering** instead — this project follows that guidance, and no
-fine-tuning code is included. `app/modules/exit_advisor/m_2.py` combines the required prompting
-strategies:
+## Screenshots
 
-- **Role prompt** — the system message casts the model narrowly as "the Conversation Exit
-  Advisor," scoped to a single decision.
-- **Instruction prompt** — explicit rules for when to end vs. not end the conversation.
-- **Few-shot learning** — examples drawn directly from `sms_conversations.json`'s `end`-labeled
-  turns, covering both disengagement ("no longer interested," "stop texting me") and
-  post-confirmation wrap-up ("Monday at 3 PM is good.") patterns, plus near-miss non-examples to
-  prevent over-triggering.
-- **API parameters** — a low temperature (0.1) to keep this classification-flavored decision
-  close to deterministic.
+<p float="left">
+  <img src="docs/screenshots/cli_demo.png" width="600"/>
+  <br><br>
+  <img src="docs/screenshots/streamlit_demo.png" width="600"/>
+</p>
 
-## Evaluation Summary
+---
+<br></br>
 
-See `tests/test_evals.ipynb` for the full accuracy and confusion-matrix results, run against all
-59 labeled recruiter turns in `sms_conversations.json` (25 `continue`, 19 `schedule`, 15 `end`).
-Run the notebook top-to-bottom to reproduce the numbers — results depend on live OpenAI API
-calls, so an `OPENAI_API_KEY` must be set in `.env` first.
+## Code Examples
 
-## Scope Note
+```python
+from datetime import datetime
+from app.main import build_main_agent
 
-Per the assignment brief, this implementation is intentionally simplified: a real production bot
-would handle additional edge cases and options beyond what's modeled here.
+agent = build_main_agent()
+history = [{"speaker": "recruiter", "text": "What kinds of Python projects have you worked on?"}]
+
+decision = agent.step(history, "I have 5 years of experience with Django.", datetime.utcnow())
+print(decision.action)       # "continue" | "schedule" | "end"
+print(decision.reply_text)   # the next SMS message to send
+```
+
+---
+<br></br>
+
+## Project Structure
+
+```text
+GENAI-JobRecruiterAgent/
+├── .gitignore
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── .env.example
+├── Python Developer Job Description.pdf   # source doc for embedding
+├── db_Tech.sql                            # original SQL Server schema (reference)
+├── sms_conversations.json                 # labeled evaluation dataset
+├── chroma_store/                          # generated Chroma vector store (committed)
+├── data/schedule.db                       # generated SQLite scheduling DB (committed)
+├── app/
+│   ├── main.py                            # CLI entry point + build_main_agent()
+│   ├── config.py                          # env loading, model names, file paths
+│   ├── conversation.py                    # shared history-formatting helpers
+│   └── modules/
+│       ├── main_agent/m_1.py              # MainAgent: dynamic advisor routing loop
+│       ├── exit_advisor/m_2.py            # Conversation Exit Advisor (prompt engineering)
+│       ├── scheduling_advisor/m_3.py      # Interview Scheduling Advisor + function-calling tool
+│       ├── info_advisor/m_4.py            # Conversation Info Advisor (RAG)
+│       ├── scheduling_db/                 # SQLite schema/seed + repository + booking check
+│       └── embedding/build_index.py       # offline PDF -> Chroma pipeline
+├── streamlit_app/
+│   ├── streamlit_main.py                  # Streamlit chat UI (PoC in place of real SMS)
+│   └── utils.py                           # UI-only helpers, no business logic
+└── tests/
+    ├── test_main.py                       # unit tests (repository + advisor-tool wrappers)
+    └── test_evals.ipynb                   # accuracy + confusion matrix
+```
+
+---
+<br></br>
+
+## Design Notes & Deviations
+
+- **SQL Server → SQLite.** The provided `db_Tech.sql` targets SQL Server, which isn't practical
+  for a portable course PoC deployed on Streamlit Community Cloud (no SQL Server available
+  there). `app/modules/scheduling_db/schema_migrate.py` reimplements the same schema and
+  business rules (Tue/Wed/Thu/Fri/Sun only, 09:00–17:00 hourly, ~50/50 random availability) in
+  SQLite, with a dynamic date-seeding window instead of the original's hardcoded 2024.
+- **`chroma_store/` and `data/schedule.db` are committed**, not gitignored — Streamlit Community
+  Cloud's filesystem is ephemeral on cold start, and rebuilding them on every boot would waste
+  embedding API calls and add latency for a tiny, rarely-changing source PDF.
+- **Fine-tuning → Prompt Engineering.** The assignment originally called for fine-tuning the
+  Exit Advisor. Following an OpenAI API change that made this impractical mid-course, guidance
+  was updated to implement this advisor entirely via prompt engineering instead — role prompt,
+  explicit instructions, few-shot examples drawn from `sms_conversations.json`, and a low
+  temperature (0.1) to keep the decision close to deterministic.
+- **Dynamic advisor routing.** The Main Agent consults advisors one at a time via LLM
+  tool-calling (matching the project's workflow diagram), rather than a fixed priority order —
+  this is inherently less deterministic than hardcoded control flow, which is reflected in the
+  evaluation notebook's results.
+
+---
+<br></br>
+
+## To-Do List
+
+- [x] Main Agent + 3 advisors
+- [x] SQL-backed scheduling with function calling
+- [x] RAG over the job description
+- [x] Streamlit PoC deployed to Streamlit Community Cloud
+- [x] Evaluation notebook (accuracy + confusion matrix)
+- [ ] Candidate registration form entry point
+- [ ] Higher scheduling-routing accuracy tuning
+
+---
+<br></br>
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+<br></br>
+
+## Contact
+
+**Adam Agbaria** - [agbariaadam@yahoo.com](mailto:agbariaadam@yahoo.com)
+Project Link: [https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent](https://github.com/Adam-Agbaria/GENAI-JobRecruiterAgent)
+
+---
+<br></br>
+
+## Acknowledgments
+
+- [Python](https://www.python.org/)
+- [LangChain](https://www.langchain.com/)
+- [OpenAI API](https://platform.openai.com/docs/overview)
+- [Streamlit](https://streamlit.io/)
+- [ChromaDB](https://www.trychroma.com/)
