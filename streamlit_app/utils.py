@@ -1,6 +1,6 @@
 """Helper functions for the Streamlit chat UI. No LLM/business logic here —
 that all lives in app.modules and is invoked identically from app/main.py."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
@@ -14,14 +14,14 @@ def init_session_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history = [{"speaker": "recruiter", "text": OPENING_MESSAGE}]
     if "simulated_now" not in st.session_state:
-        st.session_state.simulated_now = datetime.utcnow()
+        st.session_state.simulated_now = datetime.now(timezone.utc).replace(tzinfo=None)
     if "ended" not in st.session_state:
         st.session_state.ended = False
 
 
 def reset_conversation() -> None:
     st.session_state.history = [{"speaker": "recruiter", "text": OPENING_MESSAGE}]
-    st.session_state.simulated_now = datetime.utcnow()
+    st.session_state.simulated_now = datetime.now(timezone.utc).replace(tzinfo=None)
     st.session_state.ended = False
 
 

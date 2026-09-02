@@ -1,6 +1,6 @@
 """CLI entry point for the SMS job-candidate chatbot, and the shared agent
 wiring helper reused by streamlit_app/streamlit_main.py and the eval notebook."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app import config
 from app.modules.exit_advisor.m_2 import ConversationExitAdvisor
@@ -38,7 +38,8 @@ def run_cli() -> None:
             break
 
         history.append({"speaker": "candidate", "text": candidate_message})
-        decision = agent.step(history, candidate_message, datetime.utcnow())
+        conversation_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        decision = agent.step(history, candidate_message, conversation_now)
         print(f"Recruiter: {decision.reply_text}")
         history.append({"speaker": "recruiter", "text": decision.reply_text})
 
