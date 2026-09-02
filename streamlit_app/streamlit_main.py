@@ -1,7 +1,6 @@
 """Streamlit PoC UI for the SMS job-candidate chatbot (deploy target: Streamlit
 Community Cloud, standing in for real SMS integration). Pure UI glue over
 app.main.build_main_agent() — no LLM calls or business logic live here."""
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +9,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
-from app import config
 from app.main import build_main_agent
 from streamlit_app.utils import init_session_state, render_message, reset_conversation
 
@@ -32,16 +30,6 @@ if st.button("Reset conversation"):
     reset_conversation()
     st.rerun()
 
-if st.session_state.get("confirmed_slot"):
-    slot = st.session_state.confirmed_slot
-    row = sqlite3.connect(config.SCHEDULE_DB_PATH).execute(
-        "SELECT available FROM schedule WHERE schedule_id = ?", (slot["schedule_id"],)
-    ).fetchone()
-    if row and row[0] == 0:
-        st.success(f"Interview booked (confirmed in DB): {slot['date']} at {slot['time'][:5]} ({slot['position']})")
-    else:
-        st.warning("Interview was not confirmed in the database.")
-
 for turn in st.session_state.history:
     render_message(turn["speaker"], turn["text"])
 
@@ -58,11 +46,5 @@ else:
         st.session_state.history.append({"speaker": "recruiter", "text": decision.reply_text})
         render_message("recruiter", decision.reply_text)
 
-        for consultation in decision.meta.get("consultations", []):
-            confirmed_slot = consultation["output"].get("confirmed_slot")
-            if consultation["advisor"] == "consult_scheduling_advisor" and confirmed_slot:
-                st.session_state.confirmed_slot = confirmed_slot
-
         if decision.action == "end":
             st.session_state.ended = True
-            st.rerun()

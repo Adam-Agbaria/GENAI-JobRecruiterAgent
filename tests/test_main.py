@@ -49,6 +49,19 @@ def test_book_slot_flips_availability_and_is_idempotent(repo):
     assert all(s.schedule_id != slot_id for s in remaining)
 
 
+def test_list_bookings_only_reflects_actual_app_bookings(repo):
+    # Seed-time unavailability (~50% of rows) must not show up as a "booking".
+    assert repo.list_bookings() == []
+
+    slots = repo.find_available_slots("Python Dev", datetime(2024, 1, 1), None, limit=1)
+    repo.book_slot(slots[0].schedule_id)
+
+    bookings = repo.list_bookings()
+    assert len(bookings) == 1
+    assert bookings[0]["schedule_id"] == slots[0].schedule_id
+    assert bookings[0]["position"] == "Python Dev"
+
+
 def _make_agent(repo, exit_advisor=None, scheduling_advisor=None, info_advisor=None):
     return MainAgent(
         exit_advisor or MagicMock(),
